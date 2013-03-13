@@ -1,0 +1,236 @@
+#!/bin/bash
+
+# **************************************************
+# Penn State Harrisburg Deployment Script
+# 
+# Exit Code Meanings
+# 1: shflags error
+# 2: Environment not found
+# 3: Project not found
+# **************************************************
+
+#Find the directory this script is located in
+SOURCE="${BASH_SOURCE[0]}"
+DIR="$( dirname "$SOURCE" )"
+while [ -h "$SOURCE" ]
+do 
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+  DIR="$( cd -P "$( dirname "$SOURCE"  )" && pwd )"
+done
+DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+. $DIR/shflags/src/shflags
+
+REMOTE=false #Does the script need to be executed on a remote system?
+
+# Configure shflags
+FLAGS_HELP="USAGE: $0 [flags] project"
+DEFINE_boolean 'sync' false 'Pull files from production' 's'
+DEFINE_string 'env' 'mir' 'Environment to execute the command in' 'e'
+
+FLAGS "$@" || exit 1
+eval set -- "${FLAGS_ARGV}"
+
+ACTION=$1 
+PROJECT=$2 #Name assigned to a project
+
+#Production information
+webhost[1]=harrisburg.psu.edu
+webroot[1]=/var/www/html
+port[1]=1855
+#Sandbox information
+webhost[2]=websandbox.hbg.psu.edu
+webroot[2]=/var/www/drupal
+port[2]=22
+
+case "${FLAGS_env}" in
+  sand)
+    ENVNUM=2
+    REMOTE=true
+    WEBENVHOST=${webhost[2]}
+    DRUSHALIAS=@sand
+    WEBROOT=${webroot[2]}
+    PORTNUMBER=${port[2]}
+    ;;
+  mir)
+    WEBENVHOST=staging.hbg.psu.edu
+    DRUSHALIAS=@mir
+    WEBROOT=/var/www/8001
+    SYNCEXCLUDEFILE=/var/www/production-to-staging-rsync-exclude-list.txt
+    ;;
+  prod)
+    REMOTE=true
+    ENVNUM=1
+    WEBENVHOST=${webhost[1]}
+    DRUSHALIAS=@prod
+    WEBROOT=${webroot[1]}
+    PORTNUMBER=${port[1]}
+    ;;
+  dev)
+    WEBENVHOST=webmirror.hbg.psu.edu
+    DRUSHALIAS=@dev
+    WEBROOT=/var/www/html
+    SYNCEXCLUDEFILE=/var/www/production-to-development-rsync-exclude-list.txt
+    ;;
+  *)
+    echo "Environment not found."
+    exit 2
+esac
+
+case "${PROJECT}" in
+  theme)
+    PROJECTDIR=/sites/all/themes/penn_state_harrisburg
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  svn update ${WEBROOT}${PROJECTDIR}
+
+  echo 'Compiling SASS.'
+  drush $DRUSHALIAS compass penn_state_harrisburg
+
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+}
+_EOFD_
+    ;;
+  academia)
+#TODO Subprojects need reverted as well but we are hard-coding them, which is OK for now but will be a hurdel to refactoring
+    PROJECTDIR=/sites/all/modules/academia
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  svn update ${WEBROOT}${PROJECTDIR}
+  
+  echo 'Applying ID fix.'
+  sed -i 's/497/533/g' ${WEBROOT}${PROJECTDIR}/academia.views_default.inc
+  
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting features.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+  drush $DRUSHALIAS fr academia_news -y
+  drush $DRUSHALIAS fr academia_external_websites -y
+  drush $DRUSHALIAS fr academia_file_content_type -y
+  drush $DRUSHALIAS fr academia_configurations -y
+  drush $DRUSHALIAS fr academia_recommended_academic_plan_integration -y
+}
+_EOFD_
+    ;;
+  recommended_academic_plan)
+    PROJECTDIR=/sites/all/modules/recommended_academic_plan
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  svn update ${WEBROOT}${PROJECTDIR}
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting feature.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+}
+_EOFD_
+    ;;
+  administrative_offices)
+    PROJECTDIR=/sites/all/modules/administrative_offices
+    REPO=svn+ssh://webtools.hbg.psu.edu/usr/local/svn/administrative_offices/trunk
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  mkdir -p ${WEBROOT}${PROJECTDIR}
+  svn checkout ${REPO} ${WEBROOT}${PROJECTDIR}
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting feature.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+}
+_EOFD_
+    ;;
+  group_feeds)
+    PROJECTDIR=/sites/all/modules/group_feeds
+    REPO=svn+ssh://webtools.hbg.psu.edu/usr/local/svn/group_feeds/trunk
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  mkdir -p ${WEBROOT}${PROJECTDIR}
+  svn checkout ${REPO} ${WEBROOT}${PROJECTDIR}
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting feature.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+}
+_EOFD_
+    ;;
+  venued_events)
+    PROJECTDIR=/sites/all/modules/venued_events
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  svn update ${WEBROOT}${PROJECTDIR}
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting feature.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+}
+_EOFD_
+    ;;
+  housing)
+    PROJECTDIR=/sites/all/modules/housing
+    read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  echo 'Updating project from source repository.'
+  svn update ${WEBROOT}${PROJECTDIR}
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting feature.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+}
+_EOFD_
+    ;;
+  *)
+    echo "Project, ${PROJECT}, not found."
+    exit 3 
+esac
+
+
+if [ ${FLAGS_sync} -eq ${FLAGS_TRUE} ] && [ ${FLAGS_env} -ne 'prod' ]; then
+  echo "Pulling files from production. This may take a few minutes."
+  #TODO Make this fully work properly with the env flag
+  sudo rsync --rsync-path="nice rsync" -e "ssh -p ${port[1]}" -raz --exclude-from="${SYNCEXCLUDEFILE}" `whoami`@${$webhost[1]}:${webroot[1]}/ $WEBROOT
+fi
+
+case $ACTION in
+  info)
+    echo "Getting project info from ${WEBENVHOST}."
+    COMMAND="CURRENT_REVISION=\`svn info ${WEBROOT}${PROJECTDIR} | grep Revision | cut -f2 -d' '\`"
+    COMMAND=$COMMAND";echo \"Current revision on ${DRUSHALIAS}: \$CURRENT_REVISION\""
+    COMMAND=$COMMAND";REPO_REVISION=\`svn status -u ${WEBROOT}${PROJECTDIR} | grep 'Status against revision' | cut -d: -f2 | sed -r 's/\s+//'\`"
+    COMMAND=$COMMAND";echo 'Repository revision: '\$REPO_REVISION"
+    COMMAND=$COMMAND";if [ \$CURRENT_REVISION -eq \$REPO_REVISION ]; then echo 'Revisions are the same'; else svn log -r \$((\$CURRENT_REVISION+1)):\$REPO_REVISION ${WEBROOT}${PROJECTDIR}; fi"
+    ;;
+  deploy)
+    echo "Deploying project to ${WEBENVHOST}."
+    if ${REMOTE}; then 
+      COMMAND="${DEPLOYFUNCTION}; runDeployment"
+    else
+      COMMAND="${DEPLOYFUNCTION}; runDeployment"
+    fi
+    ;;
+  *)
+    echo "$ACTION is not a valid action."
+    exit 4
+esac
+
+# Start remote ssh session
+if ${REMOTE}; then
+  ssh -t -p ${PORTNUMBER} ${webhost[$ENVNUM]} "${COMMAND}"
+else
+  eval "${COMMAND}"
+fi
+
+exit 0
