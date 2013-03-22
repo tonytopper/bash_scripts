@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # **************************************************
-# Penn State Harrisburg Deployment Script
+# Bash Drupal Deployment Script
+#
+# Uses the drush command line tool in conjunction with svn
 # 
 # Exit Code Meanings
 # 1: shflags error
@@ -22,16 +24,16 @@ DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 . $DIR/shflags/src/shflags
 
-REMOTE=false # Does the script need to be executed on a remote system?
-
 # Configure shflags
 FLAGS_HELP="USAGE: $0 [flags] project"
 DEFINE_boolean 'sync' false 'Pull files from production' 's'
+DEFINE_boolean 'debug' false 'Echos debug information to the screen' 'd'
 DEFINE_string 'env' 'mir' 'Environment to execute the command in' 'e'
 
 FLAGS "$@" || exit 1
 eval set -- "${FLAGS_ARGV}"
 
+REMOTE=false # Does the script need tobe executed on a remote system?
 ACTION=$1  # What action are we performing on the project
 PROJECT=$2 # Name assigned to a project
 
@@ -46,6 +48,7 @@ port[2]=22
 
 # **************************************************
 # Setup the enviroments
+# TODO: Have this loaded from an external file
 # **************************************************
 case "${FLAGS_env}" in
   sand)
@@ -84,7 +87,39 @@ esac
 # **************************************************
 # Generate the deployment function 
 # TODO: Some of these are identical, DRY it out
+#
+# DEPLOYFUNCTION is a string that contains the code 
+# for a function.  We first make the function a string
+# so we can pass it through ssh and declare it on another 
+# system
 # **************************************************
+
+# This function sets the repository based on the output of svn info
+function set_repo() {
+  REPO=$(svn info "$1" | grep 'URL' | awk '{print $NF}')
+}
+
+# Bash scope is very different than a traditional programing language
+function standard_feature_deployment() {
+  PROJECTDIR="${WEBROOT}/sites/all/modules/${PROJECT}" 
+  set_repo $PROJECTDIR
+  read -d '' DEPLOYFUNCTION << _EOFD_
+function runDeployment {
+  mkdir -p ${PROJECTDIR}
+  echo 'Updating ${PROJECT} from ${REPO}.'
+  svn checkout ${REPO} ${PROJECTDIR}
+  echo 'Clearing Drupal cache.'
+  drush $DRUSHALIAS cc all
+
+  echo 'Reverting feature.'
+  drush $DRUSHALIAS fr ${PROJECT} -y
+}
+_EOFD_
+
+  return 0
+}
+
+#TODO: Rather than having to enter new Features into this case statement get this to work with any feature that has a .svn directory.
 case "${PROJECT}" in
   theme)
     PROJECTDIR=/sites/all/themes/penn_state_harrisburg
@@ -102,15 +137,15 @@ function runDeployment {
 _EOFD_
     ;;
   academia)
-#TODO Subprojects need reverted as well but we are hard-coding them, which is OK for now but could be a hurdel to refactoring
-    PROJECTDIR=/sites/all/modules/academia
+    #TODO Subprojects need reverted as well but we are hard-coding them, which is OK for now but could be a hurdel to refactoring
+    PROJECTDIR="${WEBROOT}/sites/all/modules/${PROJECT}"
     read -d '' DEPLOYFUNCTION << _EOFD_
 function runDeployment {
   echo 'Updating project from source repository.'
-  svn update ${WEBROOT}${PROJECTDIR}
+  svn update ${PROJECTDIR}
   
   echo 'Applying ID fix.'
-  sed -i 's/497/533/g' ${WEBROOT}${PROJECTDIR}/academia.views_default.inc
+  sed -i 's/497/533/g' ${PROJECTDIR}/academia.views_default.inc
   
   echo 'Clearing Drupal cache.'
   drush $DRUSHALIAS cc all
@@ -126,80 +161,20 @@ function runDeployment {
 _EOFD_
     ;;
   recommended_academic_plan)
-    PROJECTDIR=/sites/all/modules/recommended_academic_plan
-    read -d '' DEPLOYFUNCTION << _EOFD_
-function runDeployment {
-  echo 'Updating project from source repository.'
-  svn update ${WEBROOT}${PROJECTDIR}
-  echo 'Clearing Drupal cache.'
-  drush $DRUSHALIAS cc all
-
-  echo 'Reverting feature.'
-  drush $DRUSHALIAS fr ${PROJECT} -y
-}
-_EOFD_
+    standard_feature_deployment
     ;;
   administrative_offices)
-    PROJECTDIR=/sites/all/modules/administrative_offices
-    REPO=svn+ssh://webtools.hbg.psu.edu/usr/local/svn/administrative_offices/trunk
-    read -d '' DEPLOYFUNCTION << _EOFD_
-function runDeployment {
-  echo 'Updating project from source repository.'
-  mkdir -p ${WEBROOT}${PROJECTDIR}
-  svn checkout ${REPO} ${WEBROOT}${PROJECTDIR}
-  echo 'Clearing Drupal cache.'
-  drush $DRUSHALIAS cc all
-
-  echo 'Reverting feature.'
-  drush $DRUSHALIAS fr ${PROJECT} -y
-}
-_EOFD_
+    standard_feature_deployment
     ;;
   group_feeds)
-  	#This examples uses a checkout instead of an update, which will update if the working copy exists.  This is more orthodox then the update method
-  	#TODO: Make other projects use the checkout method instead of the update method.
-    PROJECTDIR=/sites/all/modules/group_feeds
-    REPO=svn+ssh://webtools.hbg.psu.edu/usr/local/svn/group_feeds/trunk
-    read -d '' DEPLOYFUNCTION << _EOFD_
-function runDeployment {
-  echo 'Updating project from source repository.'
-  mkdir -p ${WEBROOT}${PROJECTDIR}
-  svn checkout ${REPO} ${WEBROOT}${PROJECTDIR}
-  echo 'Clearing Drupal cache.'
-  drush $DRUSHALIAS cc all
-
-  echo 'Reverting feature.'
-  drush $DRUSHALIAS fr ${PROJECT} -y
-}
-_EOFD_
+    #TODO This module actually had initial deployment issues related to the data module
+  	standard_feature_deployment
     ;;
   venued_events)
-    PROJECTDIR=/sites/all/modules/venued_events
-    read -d '' DEPLOYFUNCTION << _EOFD_
-function runDeployment {
-  echo 'Updating project from source repository.'
-  svn update ${WEBROOT}${PROJECTDIR}
-  echo 'Clearing Drupal cache.'
-  drush $DRUSHALIAS cc all
-
-  echo 'Reverting feature.'
-  drush $DRUSHALIAS fr ${PROJECT} -y
-}
-_EOFD_
+    standard_feature_deployment
     ;;
   housing)
-    PROJECTDIR=/sites/all/modules/housing
-    read -d '' DEPLOYFUNCTION << _EOFD_
-function runDeployment {
-  echo 'Updating project from source repository.'
-  svn update ${WEBROOT}${PROJECTDIR}
-  echo 'Clearing Drupal cache.'
-  drush $DRUSHALIAS cc all
-
-  echo 'Reverting feature.'
-  drush $DRUSHALIAS fr ${PROJECT} -y
-}
-_EOFD_
+    standard_feature_deployment
     ;;
   *)
     echo "Project, ${PROJECT}, not found."
@@ -222,12 +197,12 @@ fi
 # **************************************************
 case $ACTION in
   info)
-    echo "Getting project info from ${WEBENVHOST}."
-    COMMAND="CURRENT_REVISION=\`svn info ${WEBROOT}${PROJECTDIR} | grep Revision | cut -f2 -d' '\`"
+    COMMAND="echo \"Getting project info from ${WEBENVHOST}.\""
+    COMMAND=$COMMAND";CURRENT_REVISION=\`svn info ${PROJECTDIR} | grep Revision | cut -f2 -d' '\`"
     COMMAND=$COMMAND";echo \"Current revision on ${DRUSHALIAS}: \$CURRENT_REVISION\""
-    COMMAND=$COMMAND";REPO_REVISION=\`svn status -u ${WEBROOT}${PROJECTDIR} | grep 'Status against revision' | cut -d: -f2 | sed -r 's/\s+//'\`"
+    COMMAND=$COMMAND";REPO_REVISION=\`svn status -u ${PROJECTDIR} | grep 'Status against revision' | cut -d: -f2 | sed -r 's/\s+//'\`"
     COMMAND=$COMMAND";echo 'Repository revision: '\$REPO_REVISION"
-    COMMAND=$COMMAND";if [ \$CURRENT_REVISION -eq \$REPO_REVISION ]; then echo 'Revisions are the same'; else svn log -r \$((\$CURRENT_REVISION+1)):\$REPO_REVISION ${WEBROOT}${PROJECTDIR}; fi"
+    COMMAND=$COMMAND";if [ \$CURRENT_REVISION -eq \$REPO_REVISION ]; then echo 'Revisions are the same'; else svn log -r \$((\$CURRENT_REVISION+1)):\$REPO_REVISION ${PROJECTDIR}; fi"
     ;;
   deploy)
     echo "Deploying project to ${WEBENVHOST}."
@@ -245,6 +220,11 @@ esac
 # **************************************************
 # Run the command
 # **************************************************
+
+if [ ${FLAGS_debug} -eq ${FLAGS_TRUE} ]; then
+  echo "Executing: $COMMAND"
+fi
+
 if ${REMOTE}; then
   ssh -t -p ${PORTNUMBER} ${webhost[$ENVNUM]} "${COMMAND}"
 else
