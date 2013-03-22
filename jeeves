@@ -99,14 +99,20 @@ function set_repo() {
   REPO=$(svn info "$1" | grep 'URL' | awk '{print $NF}')
 }
 
+function set_projectdir() {
+  #This will ensure that whether we are dealing with a module or a submodules the directory can be determined by our script without more input
+  PROJECTDIR=$(drush "$1" pmi "$2" | grep Path | cut -f 2 -d ":" | sed 's/^[ \t]*//;s/[ \t]*$//')
+  PROJECTDIR="${WEBROOT}/${PROJECTDIR}"	
+}
+
 # Bash scope is very different than a traditional programing language
 function standard_feature_deployment() {
-  PROJECTDIR="${WEBROOT}/sites/all/modules/${PROJECT}" 
+  set_projectdir $DRUSHALIAS $PROJECT 
   set_repo $PROJECTDIR
   read -d '' DEPLOYFUNCTION << _EOFD_
 function runDeployment {
   mkdir -p ${PROJECTDIR}
-  echo 'Updating ${PROJECT} from ${REPO}.'
+  echo 'Updating ${PROJECTDIR} from ${REPO}.'
   svn checkout ${REPO} ${PROJECTDIR}
   echo 'Clearing Drupal cache.'
   drush $DRUSHALIAS cc all
@@ -120,13 +126,14 @@ _EOFD_
 }
 
 #TODO: Rather than having to enter new Features into this case statement get this to work with any feature that has a .svn directory.
+#TODO: This doesn't need excuted if only doing an info action
 case "${PROJECT}" in
   theme)
-    PROJECTDIR=/sites/all/themes/penn_state_harrisburg
+    PROJECTDIR="${WEBROOT}/sites/all/themes/penn_state_harrisburg"
     read -d '' DEPLOYFUNCTION << _EOFD_
 function runDeployment {
   echo 'Updating project from source repository.'
-  svn update ${WEBROOT}${PROJECTDIR}
+  svn update ${PROJECTDIR}
 
   echo 'Compiling SASS.'
   drush $DRUSHALIAS compass penn_state_harrisburg
@@ -138,7 +145,7 @@ _EOFD_
     ;;
   academia)
     #TODO Subprojects need reverted as well but we are hard-coding them, which is OK for now but could be a hurdel to refactoring
-    PROJECTDIR="${WEBROOT}/sites/all/modules/${PROJECT}"
+    set_projectdir $DRUSHALIAS $PROJECT
     read -d '' DEPLOYFUNCTION << _EOFD_
 function runDeployment {
   echo 'Updating project from source repository.'
@@ -160,25 +167,26 @@ function runDeployment {
 }
 _EOFD_
     ;;
-  recommended_academic_plan)
-    standard_feature_deployment
-    ;;
-  administrative_offices)
-    standard_feature_deployment
-    ;;
   group_feeds)
     #TODO This module actually had initial deployment issues related to the data module
+    #It would need aditions to make it work propery
   	standard_feature_deployment
     ;;
-  venued_events)
-    standard_feature_deployment
-    ;;
-  housing)
-    standard_feature_deployment
-    ;;
   *)
-    echo "Project, ${PROJECT}, not found."
-    exit 3 
+    echo "Loading Features list."
+    #TODO caching the FEATURELIST could make this faster
+    declare -a FEATURELIST=($($DIR/jeeves_features_list -e ${FLAGS_env}))
+    echo "Checking in Features list."
+    case "${FEATURELIST[@]}" in  
+      *"${PROJECT}"*) 
+        echo "Found in feature list."
+        standard_feature_deployment 
+        ;;
+      *)
+        echo "Project was not found."
+        exit 3 
+      	;;
+    esac
 esac
 
 # **************************************************

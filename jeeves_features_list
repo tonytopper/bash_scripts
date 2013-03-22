@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# **************************************************
+# Give us a list of all our features in one space
+# delimited line
+# **************************************************
+
+#Find the directory this script is located in
+SOURCE="${BASH_SOURCE[0]}"
+DIR="$( dirname "$SOURCE" )"
+while [ -h "$SOURCE" ]
+do 
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+  DIR="$( cd -P "$( dirname "$SOURCE"  )" && pwd )"
+done
+DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+. $DIR/shflags/src/shflags
+
+# Configure shflags
+FLAGS_HELP="USAGE: $0 [flags] project"
+DEFINE_string 'env' 'mir' 'Environment to execute the command in' 'e'
+
+FLAGS "$@" || exit 1
+eval set -- "${FLAGS_ARGV}"
+
+drush @${FLAGS_env} features-list | sed "1d" | sed "s/\s\s\+/|/g" | cut -f 2 -d "|" | tr "\\n" " " | sed 's/ *$//g'
